@@ -64,6 +64,7 @@ import javax.microedition.khronos.opengles.GL10;
     paint.setTextSize(64);
     paint.setAntiAlias(true);
     paint.setARGB(0xFF, 0xFF, 0xFF, 0xFF);
+    paint.setAlpha(0);
     textures = new int[1];
     overlayBitmap = Bitmap.createBitmap(OVERLAY_WIDTH, OVERLAY_HEIGHT, Bitmap.Config.ARGB_8888);
     overlayCanvas = new Canvas(overlayBitmap);

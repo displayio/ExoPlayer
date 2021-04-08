@@ -18,9 +18,17 @@ package com.google.android.exoplayer2.gldemo;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.Gravity;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.Toast;
 import androidx.annotation.Nullable;
 import com.google.android.exoplayer2.C;
@@ -31,6 +39,7 @@ import com.google.android.exoplayer2.drm.DefaultDrmSessionManager;
 import com.google.android.exoplayer2.drm.DrmSessionManager;
 import com.google.android.exoplayer2.drm.FrameworkMediaDrm;
 import com.google.android.exoplayer2.drm.HttpMediaDrmCallback;
+import com.google.android.exoplayer2.source.LoopingMediaSource;
 import com.google.android.exoplayer2.source.MediaSource;
 import com.google.android.exoplayer2.source.ProgressiveMediaSource;
 import com.google.android.exoplayer2.source.dash.DashMediaSource;
@@ -42,7 +51,9 @@ import com.google.android.exoplayer2.upstream.HttpDataSource;
 import com.google.android.exoplayer2.util.Assertions;
 import com.google.android.exoplayer2.util.EventLogger;
 import com.google.android.exoplayer2.util.GlUtil;
+import com.google.android.exoplayer2.util.Log;
 import com.google.android.exoplayer2.util.Util;
+import com.google.android.exoplayer2.video.VideoListener;
 import java.util.UUID;
 
 /**
@@ -54,7 +65,18 @@ public final class MainActivity extends Activity {
   private static final String TAG = "MainActivity";
 
   private static final String DEFAULT_MEDIA_URI =
-      "https://storage.googleapis.com/exoplayer-test-media-1/mkv/android-screens-lavf-56.36.100-aac-avc-main-1280x720.mkv";
+      "https://cdn.display.io/ctvbins/asset/video/360_640_30.mp4";
+
+  private static final String HORIZONTAL_MEDIA_URI =
+      "https://cdn.display.io/ctvbins/asset/video/640_360.mp4";
+
+//      "https://storage.googleapis.com/exoplayer-test-media-1/mkv/android-screens-lavf-56.36.100-aac-avc-main-1280x720.mkv";
+
+
+  private final String BASE_VIDEO_FILE = "base_video_layer.mp4";
+  private final String OVERLAY_VIDEO_FILE = "overlay_video_layer.mp4";
+  private final String OVERLAY_VIDEO_FILE_ALFA = "overlay_video_layer_alfa.mov";
+
 
   private static final String ACTION_VIEW = "com.google.android.exoplayer.gldemo.action.VIEW";
   private static final String EXTENSION_EXTRA = "extension";
@@ -65,6 +87,10 @@ public final class MainActivity extends Activity {
   @Nullable private VideoProcessingGLSurfaceView videoProcessingGLSurfaceView;
 
   @Nullable private SimpleExoPlayer player;
+  private SimpleExoPlayer overlayExoPlayer;
+  private boolean isOverlayReady = false;
+  private FrameLayout adContainer;
+  @Nullable private PlayerView adVideoView;
 
   @Override
   protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -86,6 +112,60 @@ public final class MainActivity extends Activity {
     FrameLayout contentFrame = findViewById(R.id.exo_content_frame);
     contentFrame.addView(videoProcessingGLSurfaceView);
     this.videoProcessingGLSurfaceView = videoProcessingGLSurfaceView;
+
+    addAd();
+  }
+
+  private void addAd() {
+    Uri uri = Uri.parse(getVideoPath(OVERLAY_VIDEO_FILE));
+      DataSource.Factory dataSourceFactory = new DefaultDataSourceFactory(this,
+          Util.getUserAgent(this, "CustomApplication"));
+      MediaSource videoSource =
+          new ProgressiveMediaSource.Factory(dataSourceFactory)
+              .createMediaSource(MediaItem.fromUri(uri));
+      LoopingMediaSource loopingMediaSource = new LoopingMediaSource(videoSource, 300);
+
+      overlayExoPlayer = new SimpleExoPlayer.Builder(this).build();
+
+
+      adContainer = (FrameLayout) LayoutInflater.from(this).inflate(R.layout.ad_layout, null);
+      adContainer.setVisibility(View.INVISIBLE);
+      PlayerView adVideoView = adContainer.findViewById(R.id.ad_view);
+      adVideoView.setAlpha(0.6f);
+      adVideoView.setPlayer(overlayExoPlayer);
+      adVideoView.setUseController(false);
+
+
+      overlayExoPlayer.addListener(new Player.EventListener() {
+
+        @Override
+        public void onPlaybackStateChanged(int state) {
+          switch (state) {
+            case Player.STATE_READY:
+//              overlayExoPlayer.setPlayWhenReady(true);
+              isOverlayReady = true;
+              break;
+            case Player.STATE_BUFFERING:
+              break;
+            case Player.STATE_IDLE:
+              overlayExoPlayer.retry();
+              break;
+          }
+        }
+      });
+      overlayExoPlayer.setMediaSource(loopingMediaSource);
+      overlayExoPlayer.prepare();
+
+
+
+    FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+//    lp.gravity = Gravity.END | Gravity.BOTTOM;
+    adVideoView.setLayoutParams(lp);
+
+    FrameLayout overlayFrame = playerView.findViewById(R.id.exo_overlay);
+    overlayFrame.addView(adContainer);
+    adVideoView.setTranslationY(100);
+    adVideoView.setTranslationX(100);
   }
 
   @Override
@@ -130,6 +210,11 @@ public final class MainActivity extends Activity {
       }
       releasePlayer();
     }
+    if (adVideoView != null) {
+      adVideoView.onPause();
+      adVideoView.setPlayer(null);
+      adVideoView.getPlayer().release();
+    }
   }
 
   private void initializePlayer() {
@@ -138,7 +223,7 @@ public final class MainActivity extends Activity {
     Uri uri =
         ACTION_VIEW.equals(action)
             ? Assertions.checkNotNull(intent.getData())
-            : Uri.parse(DEFAULT_MEDIA_URI);
+            : Uri.parse(getVideoPath(BASE_VIDEO_FILE));
     DrmSessionManager drmSessionManager;
     if (Util.SDK_INT >= 18 && intent.hasExtra(DRM_SCHEME_EXTRA)) {
       String drmScheme = Assertions.checkNotNull(intent.getStringExtra(DRM_SCHEME_EXTRA));
@@ -173,6 +258,16 @@ public final class MainActivity extends Activity {
     }
 
     SimpleExoPlayer player = new SimpleExoPlayer.Builder(getApplicationContext()).build();
+    player.addListener(new Player.EventListener() {
+      @Override
+      public void onPlaybackStateChanged(int state) {
+//        if (state == Player.STATE_READY) {
+//          adVideoView.setVisibility(View.VISIBLE);
+//        } else {
+//          adVideoView.setVisibility(View.INVISIBLE);
+//        }
+      }
+    });
     player.setRepeatMode(Player.REPEAT_MODE_ALL);
     player.setMediaSource(mediaSource);
     player.prepare();
@@ -184,6 +279,7 @@ public final class MainActivity extends Activity {
     Assertions.checkNotNull(playerView).setPlayer(player);
     player.addAnalyticsListener(new EventLogger(/* trackSelector= */ null));
     this.player = player;
+    trackPosition(player);
   }
 
   private void releasePlayer() {
@@ -193,5 +289,29 @@ public final class MainActivity extends Activity {
       Assertions.checkNotNull(videoProcessingGLSurfaceView).setVideoComponent(null);
       player = null;
     }
+  }
+
+  private String getVideoPath(String fileName) {
+    return "file:/android_asset/" + fileName;
+//    return "android.resource://" + this.getPackageName() + "/raw/" + fileName;
+  }
+
+  private void trackPosition(SimpleExoPlayer player) {
+    final Handler handler = new Handler();
+    Runnable trackOnce = new Runnable() {
+      @Override
+      public void run() {
+        long currentPosition = player.getCurrentPosition();
+
+        if (currentPosition < 60000) {
+          handler.postDelayed(this, 5);
+        } else {
+          adContainer.setVisibility(View.VISIBLE);
+          overlayExoPlayer.setPlayWhenReady(true);
+        }
+      }
+    };
+
+    handler.postDelayed(trackOnce, 5);
   }
 }
